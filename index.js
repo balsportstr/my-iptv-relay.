@@ -7,7 +7,6 @@ app.get('/', (req, res) => {
     res.send('IPTV Relay Server is running. Use the /proxy endpoint.');
 });
 
-// Allow the proxy to handle any HTTP method
 app.all('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
 
@@ -16,31 +15,26 @@ app.all('/proxy', async (req, res) => {
     }
 
     try {
-        // More permissive CORS headers
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
 
-        // Handle pre-flight OPTIONS requests
         if (req.method === 'OPTIONS') {
             return res.status(200).end();
         }
 
         const response = await axios({
-            // FIX: Use the original method from the client (GET, POST, etc.)
             method: req.method,
             url: targetUrl,
             responseType: 'stream',
-            timeout: 45000, // 45 second timeout
+            // FIX: Increased timeout to 3 minutes (180,000 ms) to match VLC's patience
+            timeout: 180000, 
             headers: {
-                // Pass along more headers to appear like a legitimate client
-                'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
-                'Referer': req.headers['referer'] || targetUrl,
-                'Origin': req.headers['origin']
+                'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': req.headers['referer'] || targetUrl
             }
         });
 
-        // Pass through important headers from the source stream
         if (response.headers['content-type']) {
             res.setHeader('Content-Type', response.headers['content-type']);
         }
@@ -55,7 +49,6 @@ app.all('/proxy', async (req, res) => {
 
     } catch (error) {
         console.error('Proxy Error:', error.message);
-        // Send back the actual status code from the error if available
         const statusCode = error.response ? error.response.status : 502;
         res.status(statusCode).send(`Error fetching the URL: ${error.message}`);
     }
