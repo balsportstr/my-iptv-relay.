@@ -16,7 +16,7 @@ app.all('/proxy', async (req, res) => {
 
     try {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
 
         if (req.method === 'OPTIONS') {
@@ -24,14 +24,15 @@ app.all('/proxy', async (req, res) => {
         }
 
         const response = await axios({
-            method: req.method,
+            method: 'get', // Force GET method as it's most common for playlists
             url: targetUrl,
             responseType: 'stream',
-            // FIX: Increased timeout to 3 minutes (180,000 ms) to match VLC's patience
-            timeout: 180000, 
+            timeout: 180000, // 3 minute timeout
             headers: {
-                'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Referer': req.headers['referer'] || targetUrl
+                // FIX: Set a common VLC User-Agent to disguise the request
+                'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
+                // Also setting a generic referer can sometimes help
+                'Referer': 'http://localhost/'
             }
         });
 
