@@ -3,7 +3,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ROBUST CORS middleware
+// CORS middleware
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
@@ -12,21 +12,19 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Max-Age', '86400');
     
     if (req.method === 'OPTIONS') {
-        console.log('✅ CORS: OPTIONS request handled');
         return res.status(200).end();
     }
     next();
 });
 
 app.get('/', (req, res) => {
-    res.send('GUARANTEED WORKING IPTV Relay Server - Simple & Robust M3U8 Processing');
+    res.send('FINAL MIXED CONTENT FIX - IPTV Relay Server Ready');
 });
 
 app.all('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     
-    console.log(`\n=== GUARANTEED PROXY REQUEST ===`);
-    console.log(`Time: ${new Date().toISOString()}`);
+    console.log(`\n=== MIXED CONTENT FIX REQUEST ===`);
     console.log(`Target: ${targetUrl}`);
     
     // Always set CORS headers
@@ -48,10 +46,10 @@ app.all('/proxy', async (req, res) => {
         const isM3u8File = targetUrl.includes('.m3u8');
         const isTsFile = targetUrl.includes('.ts');
         
-        console.log(`Content type: List=${isChannelList}, Stream=${isStreamUrl}, M3U8=${isM3u8File}, TS=${isTsFile}`);
+        console.log(`Content: List=${isChannelList}, Stream=${isStreamUrl}, M3U8=${isM3u8File}, TS=${isTsFile}`);
         
         if (isChannelList) {
-            // Handle main channel list (no processing needed)
+            // Handle main channel list
             console.log('>>> Processing channel list');
             
             const response = await axios({
@@ -67,13 +65,12 @@ app.all('/proxy', async (req, res) => {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache');
             res.send(response.data);
-            console.log(`✅ Channel list served: ${response.data.length} bytes`);
+            console.log(`✅ Channel list served`);
             
         } else if (isM3u8File || isStreamUrl) {
-            // Handle M3U8 playlist or stream that might return M3U8
-            console.log('>>> Processing M3U8 stream/playlist');
+            // Handle M3U8 playlist or stream
+            console.log('>>> Processing stream/M3U8');
             
-            // First, get the content to check what it is
             const response = await axios({
                 method: 'get',
                 url: targetUrl,
@@ -85,74 +82,103 @@ app.all('/proxy', async (req, res) => {
             });
             
             const content = response.data;
-            console.log(`Got content: ${content.length} chars`);
-            console.log(`Sample: ${content.substring(0, 200)}`);
+            console.log(`Content received: ${content.length} chars`);
             
-            // Check if it's actually an M3U8 playlist
+            // Check if it's M3U8 playlist
             if (content.includes('#EXTM3U') || content.includes('#EXT-X-')) {
-                console.log('>>> CONFIRMED: M3U8 playlist - applying SIMPLE processing');
+                console.log('>>> M3U8 PLAYLIST - Applying MIXED CONTENT FIX');
                 
-                // SIMPLE LINE-BY-LINE PROCESSING
                 const lines = content.split('\n');
                 const processedLines = [];
-                const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+                let baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+                
+                // Clean up base URL to prevent double slashes
+                baseUrl = baseUrl.replace(/([^:]\/)\/+/g, '$1');
+                
                 let conversions = 0;
                 
-                console.log(`Processing ${lines.length} lines with base: ${baseUrl}`);
+                console.log(`Processing ${lines.length} lines`);
+                console.log(`Base URL: ${baseUrl}`);
                 
                 for (const line of lines) {
                     const trimmed = line.trim();
                     
                     if (!trimmed || trimmed.startsWith('#')) {
-                        // Comment or empty line - keep as-is
+                        // Keep comments and empty lines
                         processedLines.push(line);
                     } else if (trimmed.includes('.ts') || trimmed.includes('.m3u8')) {
-                        // Media file line - needs processing
+                        // Process media URLs
                         let mediaUrl;
                         
                         if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                            // Already absolute URL
+                            // Absolute URL
                             mediaUrl = trimmed;
                         } else {
-                            // Relative URL - make absolute
-                            mediaUrl = baseUrl + trimmed;
+                            // Relative URL - construct absolute URL carefully
+                            if (trimmed.startsWith('/')) {
+                                // Starts with slash - relative to domain
+                                const urlParts = new URL(targetUrl);
+                                mediaUrl = `${urlParts.protocol}//${urlParts.host}${trimmed}`;
+                            } else {
+                                // Relative to current directory
+                                mediaUrl = baseUrl + trimmed;
+                            }
                         }
                         
-                        // Create proxy URL
-                        const proxyUrl = `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(mediaUrl)}`;
+                        // Clean up any double slashes (except after protocol)
+                        mediaUrl = mediaUrl.replace(/([^:]\/)\/+/g, '$1');
+                        
+                        // CRITICAL: Force HTTPS to prevent mixed content errors
+                        if (mediaUrl.startsWith('http://')) {
+                            mediaUrl = mediaUrl.replace('http://', 'https://');
+                            console.log(`🔒 HTTP→HTTPS: ${trimmed}`);
+                        }
+                        
+                        // Create HTTPS proxy URL
+                        const proxyUrl = `https://${req.get('host')}/proxy?url=${encodeURIComponent(mediaUrl)}`;
                         processedLines.push(proxyUrl);
                         
-                        console.log(`  Converted: ${trimmed} -> ${mediaUrl} -> PROXY`);
+                        console.log(`✅ ${trimmed} → HTTPS PROXY`);
                         conversions++;
                     } else {
-                        // Other line - keep as-is
+                        // Keep other lines as-is
                         processedLines.push(line);
                     }
                 }
                 
                 const processedContent = processedLines.join('\n');
                 
-                console.log(`✅ M3U8 processing complete: ${conversions} conversions`);
-                console.log(`Processed sample: ${processedContent.substring(0, 300)}`);
+                console.log(`🎯 MIXED CONTENT FIX COMPLETE:`);
+                console.log(`  - Conversions: ${conversions}`);
+                console.log(`  - All URLs now HTTPS via proxy`);
+                console.log(`  - Content length: ${processedContent.length}`);
+                
+                // Show sample
+                const sampleLines = processedContent.split('\n').slice(0, 10);
+                console.log(`Sample processed content:`);
+                sampleLines.forEach((line, i) => {
+                    if (line.trim() && !line.startsWith('#')) {
+                        console.log(`  ${i+1}: ${line.substring(0, 100)}...`);
+                    }
+                });
                 
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Cache-Control', 'no-cache');
                 res.send(processedContent);
                 
             } else {
-                console.log('>>> Not M3U8 content - treating as stream');
-                // Not M3U8, treat as direct stream
+                console.log('>>> Not M3U8 - treating as stream');
                 await streamContent(targetUrl, req, res);
             }
             
         } else {
-            // Handle direct stream (TS file or other video)
-            console.log('>>> Processing direct stream');
+            // Handle direct stream
+            console.log('>>> Direct stream');
             await streamContent(targetUrl, req, res);
         }
         
     } catch (error) {
-        console.error(`❌ Proxy error:`, error.message);
+        console.error(`❌ Error:`, error.message);
         res.setHeader('Access-Control-Allow-Origin', '*');
         
         if (!res.headersSent) {
@@ -165,14 +191,13 @@ app.all('/proxy', async (req, res) => {
     }
 });
 
-// Helper function to stream content
+// Stream content helper
 async function streamContent(targetUrl, req, res) {
     const streamHeaders = {
         'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
         'Accept': '*/*'
     };
     
-    // Forward range header if present
     if (req.headers.range) {
         streamHeaders['Range'] = req.headers.range;
     }
@@ -185,9 +210,9 @@ async function streamContent(targetUrl, req, res) {
         headers: streamHeaders
     });
     
-    console.log(`Stream response: ${response.status} ${response.headers['content-type']}`);
+    console.log(`Stream: ${response.status} ${response.headers['content-type']}`);
     
-    // Set response headers
+    // Set headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     
     if (response.headers['content-type']) {
@@ -204,34 +229,29 @@ async function streamContent(targetUrl, req, res) {
         res.status(206);
     }
     
-    // Pipe the stream
+    // Pipe stream
     response.data.pipe(res);
-    console.log(`✅ Stream piped successfully`);
+    console.log(`✅ Stream piped`);
     
-    // Handle errors
     response.data.on('error', (error) => {
         console.error('Stream error:', error.message);
     });
     
     res.on('close', () => {
-        console.log('Client disconnected');
         if (response.data && response.data.destroy) {
             response.data.destroy();
         }
     });
 }
 
-// Health check
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
-        server: 'guaranteed-working',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        server: 'mixed-content-fixed',
+        timestamp: new Date().toISOString()
     });
 });
 
-// Global error handler
 app.use((error, req, res, next) => {
     console.error('Global error:', error.message);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -239,7 +259,6 @@ app.use((error, req, res, next) => {
     if (!res.headersSent) {
         res.status(500).json({
             error: 'Server error',
-            message: error.message,
             timestamp: new Date().toISOString()
         });
     }
@@ -247,10 +266,10 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log('=====================================');
-    console.log('🚀 GUARANTEED WORKING IPTV PROXY');
+    console.log('🔒 MIXED CONTENT FIXED IPTV PROXY');
     console.log(`📡 Port: ${PORT}`);
-    console.log('✅ Simple & Robust M3U8 Processing');
-    console.log('✅ Line-by-line URL conversion');
-    console.log('✅ Enhanced CORS support');
+    console.log('✅ HTTP→HTTPS conversion');
+    console.log('✅ Clean URL construction');
+    console.log('✅ Force HTTPS proxy URLs');
     console.log('=====================================');
 });
