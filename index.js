@@ -66,9 +66,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             status: 'OK',
-            service: 'IPTV ADTS→AAC Transcoding',
+            service: 'IPTV ADTS→AAC Transcoding (Browser Optimized)',
             timestamp: new Date().toISOString(),
-            dependencies: 'Built-in only (no external modules)'
+            dependencies: 'Built-in only',
+            ffmpeg_version: 'Browser optimized parameters'
         }));
         return;
     }
@@ -83,7 +84,7 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        console.log(`🎬 TRANSCODING REQUEST: ${targetUrl}`);
+        console.log(`🎬 BROWSER-OPTIMIZED TRANSCODING: ${targetUrl}`);
         
         try {
             // Step 1: Fetch original stream
@@ -93,18 +94,26 @@ const server = http.createServer(async (req, res) => {
             const contentType = response.headers['content-type'] || '';
             console.log(`📊 Original Content-Type: ${contentType}`);
             
-            // Step 2: Setup browser-compatible response headers
+            // Step 2: Setup ENHANCED browser-compatible headers
             res.setHeader('Content-Type', 'video/mp4');
             res.setHeader('Accept-Ranges', 'bytes');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
             
-            // Step 3: Detect if transcoding needed
+            // CRITICAL: Additional headers for browser video streaming
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('Content-Disposition', 'inline');
+            
+            // Step 3: Enhanced transcoding detection
             const needsTranscoding = (
-                contentType.includes('mp2t') ||           // MPEG-TS streams
-                contentType.includes('adts') ||           // ADTS audio streams  
-                contentType.includes('application/octet-stream') || // Unknown binary
-                targetUrl.includes('.ts') ||              // .ts files
-                !contentType.includes('mp4')              // Non-MP4 formats
+                contentType.includes('mp2t') ||           
+                contentType.includes('adts') ||           
+                contentType.includes('application/octet-stream') ||
+                targetUrl.includes('.ts') ||              
+                !contentType.includes('mp4') ||
+                contentType.includes('video/x-flv') ||    // FLV streams
+                contentType.includes('video/quicktime')   // MOV streams
             );
             
             if (!needsTranscoding && contentType.includes('mp4')) {
@@ -114,39 +123,52 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
             
-            console.log('🔄 TRANSCODING NEEDED - Starting FFmpeg with browser-compatible params...');
+            console.log('🔄 TRANSCODING NEEDED - Browser-optimized FFmpeg starting...');
             
-            // Step 4: FFmpeg transcoding with CORRECT parameters
+            // Step 4: BROWSER-OPTIMIZED FFmpeg parameters
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',                    // Input from stdin
                 '-y',                              // Overwrite output
+                '-loglevel', 'error',              // Reduce log noise
                 
-                // === BROWSER COMPATIBILITY PARAMETERS ===
+                // === CRITICAL BROWSER OPTIMIZATIONS ===
                 '-f', 'mp4',                       // Force MP4 container
-                '-movflags', 'frag_keyframe+empty_moov+default_base_moof', // Streaming MP4
-                '-fflags', '+genpts+igndts',       // Generate proper timestamps
+                '-movflags', '+frag_keyframe+empty_moov+default_base_moof+faststart', // CRITICAL: Streaming MP4
+                '-fflags', '+genpts+igndts+flush_packets', // Enhanced timestamp handling
                 
-                // === VIDEO ENCODING ===
-                '-c:v', 'libx264',                 // H.264 video codec
-                '-preset', 'ultrafast',            // Fast encoding for live streams
-                '-tune', 'zerolatency',            // Low latency for IPTV
-                '-profile:v', 'baseline',          // Maximum browser compatibility
-                '-level', '3.1',                   // Broad device support
+                // === VIDEO ENCODING (Browser Compatible) ===
+                '-c:v', 'libx264',                 // H.264 (universally supported)
+                '-preset', 'veryfast',             // Faster than ultrafast, better quality
+                '-tune', 'zerolatency',            // Real-time streaming
+                '-profile:v', 'baseline',          // Maximum compatibility
+                '-level', '3.0',                   // Lower level for better support
                 '-pix_fmt', 'yuv420p',            // Standard pixel format
-                '-r', '25',                        // Standard frame rate
+                '-g', '30',                        // GOP size (keyframe interval)
+                '-keyint_min', '30',               // Minimum keyframe interval
+                '-sc_threshold', '0',              // Disable scene change detection
                 
-                // === AUDIO ENCODING (ADTS → AAC FIX) ===
-                '-c:a', 'aac',                     // Force AAC audio codec
-                '-ar', '48000',                    // 48kHz sample rate
-                '-ac', '2',                        // Stereo audio
-                '-ab', '128k',                     // 128kbps audio bitrate
+                // === AUDIO ENCODING (ADTS → AAC Browser Fix) ===
+                '-c:a', 'aac',                     // Force AAC audio
+                '-ar', '44100',                    // Standard sample rate (more compatible than 48kHz)
+                '-ac', '2',                        // Stereo
+                '-ab', '128k',                     // Audio bitrate
                 '-aac_coder', 'twoloop',           // High quality AAC encoder
+                '-profile:a', 'aac_low',           // AAC-LC profile (most compatible)
                 
                 // === STREAMING OPTIMIZATIONS ===
                 '-avoid_negative_ts', 'make_zero', // Fix timestamp issues
-                '-max_delay', '1000000',           // 1 second max delay
-                '-max_muxing_queue_size', '1024',  // Large muxing queue
-                '-thread_queue_size', '512',       // Threading optimization
+                '-max_delay', '500000',            // 0.5 second max delay (reduced)
+                '-max_muxing_queue_size', '9999',  // Large muxing queue
+                '-max_interleave_delta', '0',      // No interleaving delay
+                
+                // === BUFFER OPTIMIZATIONS ===
+                '-buffer_size', '64k',             // Small buffer for low latency
+                '-flush_packets', '1',             // Flush packets immediately
+                
+                // === VIDEO QUALITY OPTIMIZATIONS ===
+                '-crf', '23',                      // Good quality balance
+                '-maxrate', '2M',                  // Maximum bitrate limit
+                '-bufsize', '4M',                  // Buffer size for rate control
                 
                 // === OUTPUT ===
                 '-f', 'mp4',                       // Output format
@@ -155,18 +177,27 @@ const server = http.createServer(async (req, res) => {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
             
-            // Handle FFmpeg events
+            // Enhanced FFmpeg event handling
+            let ffmpegStarted = false;
+            
             ffmpeg.on('spawn', () => {
-                console.log('✅ FFmpeg transcoding started successfully');
-                res.writeHead(200);
+                console.log('✅ Browser-optimized FFmpeg started');
+                ffmpegStarted = true;
             });
             
+            // Capture and analyze FFmpeg stderr for debugging
+            let stderrData = '';
             ffmpeg.stderr.on('data', (data) => {
                 const logLine = data.toString();
-                if (logLine.includes('frame=') || logLine.includes('time=')) {
-                    console.log(`📊 FFmpeg: ${logLine.trim()}`);
-                } else if (logLine.includes('error') || logLine.includes('Error')) {
+                stderrData += logLine;
+                
+                // Only log important info, not every frame
+                if (logLine.includes('time=') && !logLine.includes('frame=')) {
+                    console.log(`📊 FFmpeg progress: ${logLine.trim()}`);
+                } else if (logLine.includes('error') || logLine.includes('Error') || logLine.includes('failed')) {
                     console.error(`❌ FFmpeg error: ${logLine.trim()}`);
+                } else if (logLine.includes('Stream mapping:') || logLine.includes('Video:') || logLine.includes('Audio:')) {
+                    console.log(`🔍 FFmpeg info: ${logLine.trim()}`);
                 }
             });
             
@@ -174,7 +205,10 @@ const server = http.createServer(async (req, res) => {
                 console.error('❌ FFmpeg spawn error:', error);
                 if (!res.headersSent) {
                     res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Transcoding failed to start' }));
+                    res.end(JSON.stringify({ 
+                        error: 'Transcoding failed to start',
+                        details: error.message 
+                    }));
                 }
             });
             
@@ -182,23 +216,54 @@ const server = http.createServer(async (req, res) => {
                 console.log(`🏁 FFmpeg finished: code=${code}, signal=${signal}`);
                 if (code !== 0 && code !== null) {
                     console.error(`❌ FFmpeg exited with code ${code}`);
+                    console.error(`❌ FFmpeg stderr:`, stderrData);
                 }
             });
             
-            // Step 5: Pipe stream through FFmpeg
-            console.log('🔄 Piping stream: Original → FFmpeg → Browser');
+            // Step 5: Enhanced streaming pipeline
+            console.log('🔄 Starting enhanced streaming pipeline...');
+            
+            // First write headers
+            res.writeHead(200);
+            
+            // Pipe with error handling
+            response.on('error', (err) => {
+                console.error('❌ Source stream error:', err);
+                ffmpeg.stdin.destroy();
+            });
+            
+            ffmpeg.stdout.on('error', (err) => {
+                console.error('❌ FFmpeg stdout error:', err);
+                if (!res.destroyed) res.destroy();
+            });
+            
+            ffmpeg.stdin.on('error', (err) => {
+                console.error('❌ FFmpeg stdin error:', err);
+            });
+            
+            // Set up the pipeline
             response.pipe(ffmpeg.stdin);
             ffmpeg.stdout.pipe(res);
             
-            // Handle client disconnect
+            // Handle client disconnect gracefully
             res.on('close', () => {
-                console.log('🔌 Client disconnected - stopping FFmpeg');
-                ffmpeg.kill('SIGTERM');
+                console.log('🔌 Client disconnected - cleaning up FFmpeg');
+                if (ffmpegStarted) {
+                    ffmpeg.kill('SIGTERM');
+                    setTimeout(() => {
+                        if (!ffmpeg.killed) {
+                            console.log('🔨 Force killing FFmpeg');
+                            ffmpeg.kill('SIGKILL');
+                        }
+                    }, 5000);
+                }
             });
             
             req.on('close', () => {
-                console.log('🔌 Request closed - stopping FFmpeg');  
-                ffmpeg.kill('SIGTERM');
+                console.log('🔌 Request closed - cleaning up FFmpeg');
+                if (ffmpegStarted) {
+                    ffmpeg.kill('SIGTERM');
+                }
             });
             
         } catch (error) {
@@ -226,9 +291,9 @@ const server = http.createServer(async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🚀 IPTV Transcoding Server running on port ${PORT}`);
-    console.log(`✅ ADTS→AAC transcoding with browser-compatible FFmpeg parameters`);
-    console.log(`✅ No external dependencies - Built-in Node.js modules only`);
+    console.log(`🚀 Browser-Optimized IPTV Transcoding Server running on port ${PORT}`);
+    console.log(`✅ Enhanced ADTS→AAC transcoding with browser-optimized parameters`);
+    console.log(`✅ Fragmented MP4 + streaming headers for maximum compatibility`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
     console.log(`🎬 Proxy: http://localhost:${PORT}/proxy?url=STREAM_URL`);
 });
