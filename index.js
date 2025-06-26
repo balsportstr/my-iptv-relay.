@@ -66,10 +66,10 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             status: 'OK',
-            service: 'IPTV ADTS→AAC Transcoding (Browser Optimized)',
+            service: 'IPTV Live Streaming Transcoding (8-10sec fix)',
             timestamp: new Date().toISOString(),
             dependencies: 'Built-in only',
-            ffmpeg_version: 'Browser optimized parameters'
+            ffmpeg_version: 'Live streaming optimized'
         }));
         return;
     }
@@ -84,26 +84,27 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        console.log(`🎬 BROWSER-OPTIMIZED TRANSCODING: ${targetUrl}`);
+        console.log(`🎬 LIVE STREAMING TRANSCODING: ${targetUrl}`);
         
         try {
             // Step 1: Fetch original stream
-            console.log('📡 Fetching original stream...');
+            console.log('📡 Fetching original live stream...');
             const response = await fetchStream(targetUrl);
             
             const contentType = response.headers['content-type'] || '';
             console.log(`📊 Original Content-Type: ${contentType}`);
             
-            // Step 2: Setup ENHANCED browser-compatible headers
+            // Step 2: Setup LIVE STREAMING headers
             res.setHeader('Content-Type', 'video/mp4');
             res.setHeader('Accept-Ranges', 'bytes');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
             
-            // CRITICAL: Additional headers for browser video streaming
+            // CRITICAL: Live streaming headers
             res.setHeader('X-Content-Type-Options', 'nosniff');
             res.setHeader('Content-Disposition', 'inline');
+            res.setHeader('Transfer-Encoding', 'chunked');
             
             // Step 3: Enhanced transcoding detection
             const needsTranscoding = (
@@ -117,58 +118,70 @@ const server = http.createServer(async (req, res) => {
             );
             
             if (!needsTranscoding && contentType.includes('mp4')) {
-                console.log('✅ Stream already MP4 - Direct proxy (no transcoding)');
+                console.log('✅ Stream already MP4 - Direct live proxy (no transcoding)');
                 res.writeHead(200);
                 response.pipe(res);
                 return;
             }
             
-            console.log('🔄 TRANSCODING NEEDED - Browser-optimized FFmpeg starting...');
+            console.log('🔄 LIVE TRANSCODING NEEDED - Starting live-optimized FFmpeg...');
             
-            // Step 4: BROWSER-OPTIMIZED FFmpeg parameters
+            // Step 4: LIVE STREAMING OPTIMIZED FFmpeg parameters
             const ffmpeg = spawn('ffmpeg', [
                 '-i', 'pipe:0',                    // Input from stdin
                 '-y',                              // Overwrite output
                 '-loglevel', 'error',              // Reduce log noise
                 
-                // === CRITICAL BROWSER OPTIMIZATIONS ===
+                // === LIVE STREAMING CRITICAL OPTIMIZATIONS ===
                 '-f', 'mp4',                       // Force MP4 container
-                '-movflags', '+frag_keyframe+empty_moov+default_base_moof+faststart', // CRITICAL: Streaming MP4
-                '-fflags', '+genpts+igndts+flush_packets', // Enhanced timestamp handling
+                '-movflags', '+frag_keyframe+empty_moov+default_base_moof+faststart+live', // LIVE STREAMING!
+                '-fflags', '+genpts+igndts+flush_packets+nobuffer', // Live streaming flags
+                '-reset_timestamps', '1',          // Reset timestamps for live
                 
-                // === VIDEO ENCODING (Browser Compatible) ===
+                // === VIDEO ENCODING (Live Stream Optimized) ===
                 '-c:v', 'libx264',                 // H.264 (universally supported)
-                '-preset', 'veryfast',             // Faster than ultrafast, better quality
-                '-tune', 'zerolatency',            // Real-time streaming
+                '-preset', 'ultrafast',            // FASTEST encoding for live
+                '-tune', 'zerolatency',            // ZERO LATENCY for live streaming
                 '-profile:v', 'baseline',          // Maximum compatibility
                 '-level', '3.0',                   // Lower level for better support
                 '-pix_fmt', 'yuv420p',            // Standard pixel format
-                '-g', '30',                        // GOP size (keyframe interval)
-                '-keyint_min', '30',               // Minimum keyframe interval
-                '-sc_threshold', '0',              // Disable scene change detection
                 
-                // === AUDIO ENCODING (ADTS → AAC Browser Fix) ===
+                // === GOP SETTINGS FOR LIVE STREAMING ===
+                '-g', '25',                        // GOP size = 1 second (25fps)
+                '-keyint_min', '25',               // Minimum keyframe interval
+                '-sc_threshold', '0',              // Disable scene change detection
+                '-force_key_frames', 'expr:gte(t,n_forced*1)', // Force keyframe every 1 sec
+                
+                // === AUDIO ENCODING (ADTS → AAC Live Fix) ===
                 '-c:a', 'aac',                     // Force AAC audio
-                '-ar', '44100',                    // Standard sample rate (more compatible than 48kHz)
+                '-ar', '44100',                    // Standard sample rate
                 '-ac', '2',                        // Stereo
                 '-ab', '128k',                     // Audio bitrate
                 '-aac_coder', 'twoloop',           // High quality AAC encoder
                 '-profile:a', 'aac_low',           // AAC-LC profile (most compatible)
                 
-                // === STREAMING OPTIMIZATIONS ===
+                // === LIVE STREAMING CRITICAL SETTINGS ===
                 '-avoid_negative_ts', 'make_zero', // Fix timestamp issues
-                '-max_delay', '500000',            // 0.5 second max delay (reduced)
-                '-max_muxing_queue_size', '9999',  // Large muxing queue
+                '-max_delay', '0',                 // ZERO delay for live streaming
+                '-max_muxing_queue_size', '1024',  // Large muxing queue for live
                 '-max_interleave_delta', '0',      // No interleaving delay
+                '-muxdelay', '0',                  // No mux delay
+                '-muxpreload', '0',                // No mux preload
                 
-                // === BUFFER OPTIMIZATIONS ===
-                '-buffer_size', '64k',             // Small buffer for low latency
+                // === BUFFER OPTIMIZATIONS FOR CONTINUOUS STREAMING ===
                 '-flush_packets', '1',             // Flush packets immediately
+                '-write_tmcd', '0',                // Don't write timecode
                 
-                // === VIDEO QUALITY OPTIMIZATIONS ===
-                '-crf', '23',                      // Good quality balance
-                '-maxrate', '2M',                  // Maximum bitrate limit
-                '-bufsize', '4M',                  // Buffer size for rate control
+                // === LIVE STREAM QUALITY SETTINGS ===
+                '-crf', '28',                      // Faster encoding (lower quality for speed)
+                '-maxrate', '1M',                  // Lower maximum bitrate for stability
+                '-bufsize', '2M',                  // Buffer size for rate control
+                '-r', '25',                        // Fixed frame rate
+                
+                // === FRAGMENTATION FOR LIVE STREAMING ===
+                '-fragment_time', '1',             // 1 second fragments
+                '-frag_duration', '1000000',       // 1 second in microseconds
+                '-min_frag_duration', '1000000',   // Minimum fragment duration
                 
                 // === OUTPUT ===
                 '-f', 'mp4',                       // Output format
@@ -177,11 +190,11 @@ const server = http.createServer(async (req, res) => {
                 stdio: ['pipe', 'pipe', 'pipe']
             });
             
-            // Enhanced FFmpeg event handling
+            // Enhanced FFmpeg event handling for live streaming
             let ffmpegStarted = false;
             
             ffmpeg.on('spawn', () => {
-                console.log('✅ Browser-optimized FFmpeg started');
+                console.log('✅ Live streaming FFmpeg started');
                 ffmpegStarted = true;
             });
             
@@ -191,87 +204,108 @@ const server = http.createServer(async (req, res) => {
                 const logLine = data.toString();
                 stderrData += logLine;
                 
-                // Only log important info, not every frame
+                // Only log important info for live streaming
                 if (logLine.includes('time=') && !logLine.includes('frame=')) {
-                    console.log(`📊 FFmpeg progress: ${logLine.trim()}`);
+                    console.log(`📊 Live FFmpeg progress: ${logLine.trim()}`);
                 } else if (logLine.includes('error') || logLine.includes('Error') || logLine.includes('failed')) {
-                    console.error(`❌ FFmpeg error: ${logLine.trim()}`);
+                    console.error(`❌ Live FFmpeg error: ${logLine.trim()}`);
                 } else if (logLine.includes('Stream mapping:') || logLine.includes('Video:') || logLine.includes('Audio:')) {
-                    console.log(`🔍 FFmpeg info: ${logLine.trim()}`);
+                    console.log(`🔍 Live FFmpeg info: ${logLine.trim()}`);
+                } else if (logLine.includes('frame=') && logLine.includes('fps=')) {
+                    // Periodic progress logging for live streams
+                    const match = logLine.match(/frame=\s*(\d+).*fps=\s*([\d.]+).*time=\s*([\d:]+)/);
+                    if (match) {
+                        console.log(`📺 Live: ${match[1]} frames, ${match[2]} fps, time ${match[3]}`);
+                    }
                 }
             });
             
             ffmpeg.on('error', (error) => {
-                console.error('❌ FFmpeg spawn error:', error);
+                console.error('❌ Live FFmpeg spawn error:', error);
                 if (!res.headersSent) {
                     res.writeHead(500, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ 
-                        error: 'Transcoding failed to start',
+                        error: 'Live transcoding failed to start',
                         details: error.message 
                     }));
                 }
             });
             
             ffmpeg.on('exit', (code, signal) => {
-                console.log(`🏁 FFmpeg finished: code=${code}, signal=${signal}`);
+                console.log(`🏁 Live FFmpeg finished: code=${code}, signal=${signal}`);
                 if (code !== 0 && code !== null) {
-                    console.error(`❌ FFmpeg exited with code ${code}`);
-                    console.error(`❌ FFmpeg stderr:`, stderrData);
+                    console.error(`❌ Live FFmpeg exited with code ${code}`);
+                    console.error(`❌ Live FFmpeg stderr:`, stderrData);
                 }
             });
             
-            // Step 5: Enhanced streaming pipeline
-            console.log('🔄 Starting enhanced streaming pipeline...');
+            // Step 5: Enhanced live streaming pipeline
+            console.log('🔄 Starting live streaming pipeline...');
             
             // First write headers
             res.writeHead(200);
             
-            // Pipe with error handling
+            // Enhanced error handling for live streams
             response.on('error', (err) => {
-                console.error('❌ Source stream error:', err);
-                ffmpeg.stdin.destroy();
+                console.error('❌ Live source stream error:', err);
+                if (ffmpegStarted) {
+                    ffmpeg.stdin.destroy();
+                }
             });
             
             ffmpeg.stdout.on('error', (err) => {
-                console.error('❌ FFmpeg stdout error:', err);
+                console.error('❌ Live FFmpeg stdout error:', err);
                 if (!res.destroyed) res.destroy();
             });
             
             ffmpeg.stdin.on('error', (err) => {
-                console.error('❌ FFmpeg stdin error:', err);
+                console.error('❌ Live FFmpeg stdin error:', err);
             });
             
-            // Set up the pipeline
+            // Set up the live streaming pipeline
             response.pipe(ffmpeg.stdin);
             ffmpeg.stdout.pipe(res);
             
-            // Handle client disconnect gracefully
+            // Handle client disconnect gracefully for live streams
             res.on('close', () => {
-                console.log('🔌 Client disconnected - cleaning up FFmpeg');
+                console.log('🔌 Live stream client disconnected - cleaning up FFmpeg');
                 if (ffmpegStarted) {
                     ffmpeg.kill('SIGTERM');
                     setTimeout(() => {
                         if (!ffmpeg.killed) {
-                            console.log('🔨 Force killing FFmpeg');
+                            console.log('🔨 Force killing live FFmpeg');
                             ffmpeg.kill('SIGKILL');
                         }
-                    }, 5000);
+                    }, 3000); // Shorter timeout for live streams
                 }
             });
             
             req.on('close', () => {
-                console.log('🔌 Request closed - cleaning up FFmpeg');
+                console.log('🔌 Live stream request closed - cleaning up FFmpeg');
                 if (ffmpegStarted) {
                     ffmpeg.kill('SIGTERM');
                 }
             });
             
+            // Monitor FFmpeg health for live streaming
+            const healthCheck = setInterval(() => {
+                if (ffmpegStarted && !ffmpeg.killed) {
+                    console.log('💓 Live FFmpeg health check: Running');
+                } else {
+                    clearInterval(healthCheck);
+                }
+            }, 30000); // Check every 30 seconds
+            
+            ffmpeg.on('exit', () => {
+                clearInterval(healthCheck);
+            });
+            
         } catch (error) {
-            console.error('❌ Proxy error:', error);
+            console.error('❌ Live streaming proxy error:', error);
             if (!res.headersSent) {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ 
-                    error: 'Stream processing failed',
+                    error: 'Live stream processing failed',
                     details: error.message,
                     timestamp: new Date().toISOString()
                 }));
@@ -291,9 +325,10 @@ const server = http.createServer(async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🚀 Browser-Optimized IPTV Transcoding Server running on port ${PORT}`);
-    console.log(`✅ Enhanced ADTS→AAC transcoding with browser-optimized parameters`);
-    console.log(`✅ Fragmented MP4 + streaming headers for maximum compatibility`);
+    console.log(`🚀 Live Streaming IPTV Transcoding Server running on port ${PORT}`);
+    console.log(`✅ Live streaming ADTS→AAC transcoding (8-10sec fix)`);
+    console.log(`✅ Zero-delay fragmented MP4 for continuous streaming`);
+    console.log(`✅ Ultra-fast encoding with live stream optimizations`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
-    console.log(`🎬 Proxy: http://localhost:${PORT}/proxy?url=STREAM_URL`);
+    console.log(`🎬 Live Proxy: http://localhost:${PORT}/proxy?url=STREAM_URL`);
 });
