@@ -3,45 +3,37 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CRITICAL: Enhanced CORS middleware that ALWAYS applies headers
+// Enhanced CORS middleware that ALWAYS applies headers
 app.use((req, res, next) => {
-    // Apply CORS headers to EVERY response, including errors
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
-    res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
+    res.setHeader('Access-Control-Max-Age', '86400');
     
-    // Handle preflight OPTIONS requests immediately
     if (req.method === 'OPTIONS') {
         console.log('✅ CORS: Handling OPTIONS preflight request');
         return res.status(200).end();
     }
-    
-    // Continue to next middleware
     next();
 });
 
 // Additional error-handling CORS middleware
 app.use((req, res, next) => {
-    // Override res.status to ensure CORS headers are always included
     const originalStatus = res.status;
     res.status = function(code) {
-        // Re-apply CORS headers even when setting error status
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
         res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
         return originalStatus.call(this, code);
     };
     
-    // Override res.json to ensure CORS headers are included
     const originalJson = res.json;
     res.json = function(obj) {
         res.setHeader('Access-Control-Allow-Origin', '*');
         return originalJson.call(this, obj);
     };
     
-    // Override res.send to ensure CORS headers are included
     const originalSend = res.send;
     res.send = function(body) {
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -52,7 +44,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('Enhanced IPTV Relay Server with Fixed CORS is running. Use the /proxy endpoint.');
+    res.send('Enhanced IPTV Relay Server with FIXED M3U8 processing is running. Use the /proxy endpoint.');
 });
 
 app.all('/proxy', async (req, res) => {
@@ -63,9 +55,8 @@ app.all('/proxy', async (req, res) => {
     console.log(`Method: ${req.method}`);
     console.log(`Target URL: ${targetUrl}`);
     console.log(`Origin: ${req.headers.origin || 'No Origin'}`);
-    console.log(`User-Agent: ${req.headers['user-agent']}`);
     
-    // CRITICAL: Ensure CORS headers are set immediately
+    // Ensure CORS headers are set immediately
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
@@ -85,12 +76,11 @@ app.all('/proxy', async (req, res) => {
                            targetUrl.includes('playlist') ||
                            targetUrl.includes('type=m3u');
         
-        // Better Xtream stream detection
         const isXtreamStream = !isM3URequest && (
-            targetUrl.match(/\/\d+$/) ||           // ends with numbers (Xtream channel ID)
-            targetUrl.includes('/live/') ||        // contains /live/
-            targetUrl.includes('/movie/') ||       // contains /movie/
-            targetUrl.includes('/series/')         // contains /series/
+            targetUrl.match(/\/\d+$/) ||
+            targetUrl.includes('/live/') ||
+            targetUrl.includes('/movie/') ||
+            targetUrl.includes('/series/')
         );
         
         const isM3U8File = targetUrl.includes('.m3u8');
@@ -103,7 +93,7 @@ app.all('/proxy', async (req, res) => {
         console.log(`  - Direct Video: ${isDirectVideoFile}`);
         
         if (isM3URequest) {
-            // Handle M3U playlists
+            // Handle M3U playlists (main channel list)
             console.log('>>> CORS: Handling M3U playlist request');
             
             const response = await axios({
@@ -117,11 +107,10 @@ app.all('/proxy', async (req, res) => {
                     'Accept': 'application/vnd.apple.mpegurl,text/plain,*/*'
                 },
                 validateStatus: function (status) {
-                    return status >= 200 && status < 500; // Don't throw on 4xx errors
+                    return status >= 200 && status < 500;
                 }
             });
             
-            // Ensure CORS headers on response
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Content-Disposition', 'inline; filename="playlist.m3u"');
@@ -130,11 +119,10 @@ app.all('/proxy', async (req, res) => {
             res.send(response.data);
             console.log(`✅ CORS: M3U playlist served: ${response.data.length} bytes`);
             
-        } else if (isXtreamStream || isM3U8File) {
-            // Handle Xtream streams or M3U8 files
-            console.log('>>> CORS: Handling Xtream/M3U8 stream - analyzing content...');
+        } else if (isXtreamStream || isM3U8File || isDirectVideoFile) {
+            // Handle Xtream streams, M3U8 files, or direct video files
+            console.log('>>> CORS: Handling Xtream/M3U8/Video stream - analyzing content...');
             
-            // Step 1: Check what this URL actually returns with enhanced error handling
             let sampleResponse;
             try {
                 sampleResponse = await axios({
@@ -146,12 +134,12 @@ app.all('/proxy', async (req, res) => {
                         'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
                         'Referer': 'http://localhost/',
                         'Accept': '*/*',
-                        'Range': req.headers.range || 'bytes=0-2047' // First 2KB for analysis
+                        'Range': req.headers.range || 'bytes=0-2047'
                     },
                     validateStatus: function (status) {
-                        return status >= 200 && status < 500; // Don't throw on 4xx errors
+                        return status >= 200 && status < 500;
                     },
-                    maxRedirects: 5 // Follow redirects
+                    maxRedirects: 5
                 });
                 
                 console.log(`CORS: Sample response status: ${sampleResponse.status}`);
@@ -159,14 +147,13 @@ app.all('/proxy', async (req, res) => {
             } catch (axiosError) {
                 console.log('⚠️ CORS: Range request failed, trying without range...');
                 
-                // Fallback: try without range header
                 try {
                     sampleResponse = await axios({
                         method: req.method.toLowerCase(),
                         url: targetUrl,
                         timeout: 30000,
                         responseType: 'arraybuffer',
-                        maxContentLength: 2048, // Limit to 2KB
+                        maxContentLength: 2048,
                         headers: {
                             'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
                             'Referer': 'http://localhost/',
@@ -183,14 +170,13 @@ app.all('/proxy', async (req, res) => {
                 } catch (fallbackError) {
                     console.error('❌ CORS: Both sample requests failed:', fallbackError.message);
                     
-                    // Ensure CORS headers on error response
                     res.setHeader('Access-Control-Allow-Origin', '*');
                     return res.status(502).json({
-                        error: `Failed to fetch Xtream stream: ${fallbackError.message}`,
+                        error: `Failed to fetch stream: ${fallbackError.message}`,
                         targetUrl: targetUrl,
                         timestamp: new Date().toISOString(),
                         details: {
-                            type: 'XTREAM_FETCH_ERROR',
+                            type: 'STREAM_FETCH_ERROR',
                             originalError: fallbackError.code
                         }
                     });
@@ -214,7 +200,7 @@ app.all('/proxy', async (req, res) => {
                              contentType.includes('m3u');
             
             if (isPlaylist) {
-                console.log('>>> CORS: Detected as M3U8 playlist - serving as text');
+                console.log('>>> CORS: Detected as M3U8 playlist - serving with FIXED URL processing');
                 
                 // Get full playlist content
                 const fullResponse = await axios({
@@ -234,41 +220,71 @@ app.all('/proxy', async (req, res) => {
                 
                 let content = fullResponse.data;
                 console.log(`CORS: Full playlist content length: ${content.length}`);
+                console.log(`CORS: Original playlist sample:`, content.substring(0, 300));
                 
-                // Process relative URLs in M3U8
+                // FIXED: Process relative URLs in M3U8 with correct proxy format
                 if (content.includes('.ts') || content.includes('.m3u8')) {
                     const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+                    console.log(`CORS: Base URL for relative paths: ${baseUrl}`);
                     
-                    // Convert relative .ts URLs
-                    content = content.replace(/^(?!https?:\/\/)([^#\n\r][^\n\r]*\.ts[^\n\r]*)$/gm, (match, filename) => {
-                        const fullUrl = baseUrl + filename.trim();
+                    let tsConversions = 0;
+                    let m3u8Conversions = 0;
+                    
+                    // FIXED: Convert relative .ts URLs - improved regex
+                    const originalContent = content;
+                    
+                    // Match lines that end with .ts (not starting with # or http)
+                    content = content.replace(/^(?!#|https?:\/\/)([^\r\n]*\.ts)(\?[^\r\n]*)?$/gm, (match, filename, query) => {
+                        const cleanFilename = filename.trim();
+                        const fullUrl = baseUrl + cleanFilename + (query || '');
                         const proxyUrl = `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(fullUrl)}`;
-                        console.log(`    CORS: Converting TS: ${filename.trim()} -> ${proxyUrl}`);
+                        console.log(`    CORS: TS: ${cleanFilename} -> PROXY`);
+                        tsConversions++;
                         return proxyUrl;
                     });
                     
-                    // Convert relative .m3u8 URLs
-                    content = content.replace(/^(?!https?:\/\/)([^#\n\r][^\n\r]*\.m3u8[^\n\r]*)$/gm, (match, filename) => {
-                        const fullUrl = baseUrl + filename.trim();
+                    // FIXED: Convert relative .m3u8 URLs - improved regex
+                    content = content.replace(/^(?!#|https?:\/\/)([^\r\n]*\.m3u8)(\?[^\r\n]*)?$/gm, (match, filename, query) => {
+                        const cleanFilename = filename.trim();
+                        const fullUrl = baseUrl + cleanFilename + (query || '');
                         const proxyUrl = `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(fullUrl)}`;
-                        console.log(`    CORS: Converting M3U8: ${filename.trim()} -> ${proxyUrl}`);
+                        console.log(`    CORS: M3U8: ${cleanFilename} -> PROXY`);
+                        m3u8Conversions++;
                         return proxyUrl;
                     });
+                    
+                    // Handle absolute URLs that might need proxying (but not already proxied)
+                    content = content.replace(/^(https?:\/\/[^\r\n#]+\.ts(?:\?[^\r\n]*)?)$/gm, (match, fullTsUrl) => {
+                        if (fullTsUrl.includes(req.get('host'))) {
+                            return fullTsUrl; // Already proxied
+                        }
+                        
+                        const proxyUrl = `${req.protocol}://${req.get('host')}/proxy?url=${encodeURIComponent(fullTsUrl)}`;
+                        console.log(`    CORS: Absolute TS: ${fullTsUrl} -> PROXY`);
+                        tsConversions++;
+                        return proxyUrl;
+                    });
+                    
+                    console.log(`CORS: URL conversion summary:`);
+                    console.log(`  - TS conversions: ${tsConversions}`);
+                    console.log(`  - M3U8 conversions: ${m3u8Conversions}`);
+                    console.log(`  - Content changed: ${originalContent !== content}`);
                 }
                 
-                // Ensure CORS headers on playlist response
+                // Show sample of processed content
+                console.log(`CORS: Processed playlist sample:`, content.substring(0, 500));
+                
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Cache-Control', 'no-cache');
                 res.setHeader('Content-Length', Buffer.byteLength(content, 'utf8'));
                 res.send(content);
                 
-                console.log(`✅ CORS: M3U8 playlist processed and served: ${content.length} chars`);
+                console.log(`✅ CORS: M3U8 playlist processed with FIXED URLs: ${content.length} chars`);
                 
             } else {
                 console.log('>>> CORS: Detected as streaming video content - setting up stream proxy');
                 
-                // Handle as streaming video content
                 const streamHeaders = {
                     'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
                     'Referer': 'http://localhost/',
@@ -276,7 +292,6 @@ app.all('/proxy', async (req, res) => {
                     'Connection': 'keep-alive'
                 };
                 
-                // Forward range header if present
                 if (req.headers.range) {
                     streamHeaders['Range'] = req.headers.range;
                     console.log(`    CORS: Forwarding Range header: ${req.headers.range}`);
@@ -293,15 +308,10 @@ app.all('/proxy', async (req, res) => {
                     }
                 });
                 
-                console.log(`CORS: Stream response:`);
-                console.log(`    Status: ${response.status}`);
-                console.log(`    Content-Type: ${response.headers['content-type']}`);
-                console.log(`    Content-Length: ${response.headers['content-length']}`);
+                console.log(`CORS: Stream response status: ${response.status}`);
                 
-                // Ensure CORS headers on stream response
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 
-                // Forward relevant headers
                 if (response.headers['content-type']) {
                     res.setHeader('Content-Type', response.headers['content-type']);
                 }
@@ -313,19 +323,16 @@ app.all('/proxy', async (req, res) => {
                 }
                 if (response.headers['content-range']) {
                     res.setHeader('Content-Range', response.headers['content-range']);
-                    res.status(206); // Partial Content
+                    res.status(206);
                 }
                 
-                // Additional streaming headers
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
                 res.setHeader('Pragma', 'no-cache');
                 res.setHeader('Expires', '0');
                 
-                // Pipe the stream
                 response.data.pipe(res);
                 console.log(`✅ CORS: Video stream piped successfully`);
                 
-                // Handle stream errors
                 response.data.on('error', (error) => {
                     console.error('CORS: Stream error:', error.message);
                     if (!res.headersSent) {
@@ -346,7 +353,7 @@ app.all('/proxy', async (req, res) => {
             }
             
         } else {
-            // Handle other content (images, etc.)
+            // Handle other content
             console.log('>>> CORS: Handling other content as binary');
             
             const response = await axios({
@@ -364,7 +371,6 @@ app.all('/proxy', async (req, res) => {
                 }
             });
             
-            // Ensure CORS headers
             res.setHeader('Access-Control-Allow-Origin', '*');
             
             if (response.headers['content-type']) {
@@ -384,20 +390,17 @@ app.all('/proxy', async (req, res) => {
         console.error(`  Code: ${error.code}`);
         console.error(`  Target URL: ${targetUrl}`);
         
-        // CRITICAL: Ensure CORS headers are included in error responses
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
         res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
         
         if (error.response) {
             console.error(`  Response Status: ${error.response.status}`);
-            console.error(`  Response Headers:`, error.response.headers);
         }
         
         const statusCode = error.response?.status || 502;
         const errorMessage = `Proxy Error: ${error.message}`;
         
-        // Ensure error response includes CORS headers
         if (!res.headersSent) {
             res.status(statusCode).json({
                 error: errorMessage,
@@ -414,22 +417,20 @@ app.all('/proxy', async (req, res) => {
     }
 });
 
-// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         memory: process.memoryUsage(),
-        cors: 'enhanced'
+        cors: 'enhanced',
+        m3u8: 'fixed'
     });
 });
 
-// Global error handler with CORS
 app.use((error, req, res, next) => {
     console.error('Global error handler:', error.message);
     
-    // Ensure CORS headers even in global error handler
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
@@ -446,10 +447,11 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log('=================================');
-    console.log('🚀 Enhanced IPTV Relay Server with Fixed CORS');
+    console.log('🚀 Enhanced IPTV Relay Server with FIXED M3U8 Processing');
     console.log(`📡 Server running on port ${PORT}`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
     console.log(`📺 Proxy endpoint: http://localhost:${PORT}/proxy?url=TARGET_URL`);
     console.log('✅ CORS: Enhanced cross-origin support enabled');
+    console.log('✅ M3U8: Fixed URL rewriting for TS segments');
     console.log('=================================');
 });
