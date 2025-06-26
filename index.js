@@ -1,377 +1,179 @@
 const express = require('express');
-const axios = require('axios');
+const cors = require('cors');
+const fetch = require('node-fetch');
+const { spawn } = require('child_process');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// CORS middleware
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    next();
-});
+// CORS setup for IPTV player
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'HEAD', 'OPTIONS'],
+    allowedHeaders: ['*']
+}));
 
-app.get('/', (req, res) => {
-    res.send('TS SEGMENT FIXED - IPTV Relay Server Ready');
-});
-
-app.all('/proxy', async (req, res) => {
-    const targetUrl = req.query.url;
-    
-    console.log(`\n=== TS SEGMENT FIX REQUEST ===`);
-    console.log(`Target: ${targetUrl}`);
-    
-    // Always set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, Cache-Control, Authorization');
-    
-    if (!targetUrl) {
-        return res.status(400).json({ 
-            error: 'URL parameter required',
-            timestamp: new Date().toISOString()
-        });
-    }
-    
-    try {
-        // CRITICAL FIX: Keep original protocol (don't force HTTPS on backend requests)
-        const originalUrl = targetUrl;
-        const isHttps = originalUrl.startsWith('https://');
-        
-        console.log(`Protocol: ${isHttps ? 'HTTPS' : 'HTTP'} (keeping original)`);
-        
-        // Simple content type detection
-        const isChannelList = targetUrl.includes('get.php') && targetUrl.includes('type=m3u');
-        const isStreamUrl = targetUrl.includes('/live/') || targetUrl.match(/\/\d+$/);
-        const isM3u8File = targetUrl.includes('.m3u8');
-        const isTsFile = targetUrl.includes('.ts') || targetUrl.match(/_\d+\.ts$/);
-        
-        console.log(`Content: List=${isChannelList}, Stream=${isStreamUrl}, M3U8=${isM3u8File}, TS=${isTsFile}`);
-        
-        if (isChannelList) {
-            // Handle main channel list
-            console.log('>>> Processing channel list');
-            
-            const response = await axios({
-                method: 'get',
-                url: originalUrl, // Keep original protocol
-                responseType: 'text',
-                timeout: 60000,
-                headers: {
-                    'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4'
-                },
-                // Add this for HTTP servers
-                httpsAgent: false,
-                httpAgent: false
-            });
-            
-            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.send(response.data);
-            console.log(`✅ Channel list served`);
-            
-        } else if (isM3u8File || isStreamUrl) {
-            // Handle M3U8 playlist or stream
-            console.log('>>> Processing stream/M3U8');
-            
-            const response = await axios({
-                method: 'get',
-                url: originalUrl, // Keep original protocol
-                responseType: 'text',
-                timeout: 30000,
-                headers: {
-                    'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4'
-                },
-                // Add this for HTTP servers
-                httpsAgent: false,
-                httpAgent: false
-            });
-            
-            const content = response.data;
-            console.log(`Content received: ${content.length} chars`);
-            
-            // Check if it's M3U8 playlist
-            if (content.includes('#EXTM3U') || content.includes('#EXT-X-')) {
-                console.log('>>> M3U8 PLAYLIST - Applying SSL ERROR FIX');
-                
-                const lines = content.split('\n');
-                const processedLines = [];
-                let baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
-                
-                // Clean up base URL to prevent double slashes
-                baseUrl = baseUrl.replace(/([^:]\/)\/+/g, '$1');
-                
-                let conversions = 0;
-                
-                console.log(`Processing ${lines.length} lines`);
-                console.log(`Base URL: ${baseUrl}`);
-                
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    
-                    if (!trimmed || trimmed.startsWith('#')) {
-                        // Keep comments and empty lines
-                        processedLines.push(line);
-                    } else if (trimmed.includes('.ts') || trimmed.includes('.m3u8')) {
-                        // Process media URLs
-                        let mediaUrl;
-                        
-                        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                            // Absolute URL - KEEP ORIGINAL PROTOCOL
-                            mediaUrl = trimmed;
-                        } else {
-                            // Relative URL - construct absolute URL carefully
-                            if (trimmed.startsWith('/')) {
-                                // Starts with slash - relative to domain
-                                const urlParts = new URL(originalUrl);
-                                mediaUrl = `${urlParts.protocol}//${urlParts.host}${trimmed}`;
-                            } else {
-                                // Relative to current directory
-                                mediaUrl = baseUrl + trimmed;
-                            }
-                        }
-                        
-                        // Clean up any double slashes (except after protocol)
-                        mediaUrl = mediaUrl.replace(/([^:]\/)\/+/g, '$1');
-                        
-                        // CRITICAL FIX: DON'T convert HTTP to HTTPS here!
-                        // Keep original protocol for backend requests
-                        console.log(`🔗 Original protocol preserved: ${mediaUrl}`);
-                        
-                        // Create proxy URL (proxy itself is HTTPS, but targets original protocol)
-                        const proxyUrl = `https://${req.get('host')}/proxy?url=${encodeURIComponent(mediaUrl)}`;
-                        processedLines.push(proxyUrl);
-                        
-                        console.log(`✅ ${trimmed} → PROXY (protocol preserved)`);
-                        conversions++;
-                    } else {
-                        // Keep other lines as-is
-                        processedLines.push(line);
-                    }
-                }
-                
-                const processedContent = processedLines.join('\n');
-                
-                console.log(`🎯 SSL ERROR FIX COMPLETE:`);
-                console.log(`  - Conversions: ${conversions}`);
-                console.log(`  - Original protocols preserved`);
-                console.log(`  - Content length: ${processedContent.length}`);
-                
-                res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.send(processedContent);
-                
-            } else {
-                console.log('>>> Not M3U8 - treating as stream');
-                await streamContent(originalUrl, req, res);
-            }
-            
-        } else if (isTsFile || targetUrl.includes('.ts')) {
-            // Handle TS segments with special care
-            console.log('>>> TS SEGMENT - Special handling');
-            await streamTsSegment(originalUrl, req, res);
-        } else {
-            // Handle direct stream
-            console.log('>>> Direct stream');
-            await streamContent(originalUrl, req, res);
-        }
-        
-    } catch (error) {
-        console.error(`❌ SSL Error Fixed:`, error.message);
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        
-        if (!res.headersSent) {
-            res.status(502).json({
-                error: `Proxy error: ${error.message}`,
-                url: targetUrl,
-                timestamp: new Date().toISOString(),
-                fix: 'SSL protocol preserved'
-            });
-        }
-    }
-});
-
-// Stream content helper - FIXED for SSL errors
-async function streamContent(targetUrl, req, res) {
-    const streamHeaders = {
-        'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
-        'Accept': '*/*'
-    };
-    
-    if (req.headers.range) {
-        streamHeaders['Range'] = req.headers.range;
-    }
-    
-    const response = await axios({
-        method: req.method.toLowerCase(),
-        url: targetUrl, // Keep original protocol
-        responseType: 'stream',
-        timeout: 120000,
-        headers: streamHeaders,
-        // CRITICAL: Add these for HTTP servers
-        httpsAgent: false,
-        httpAgent: false,
-        // Additional SSL fix
-        rejectUnauthorized: false
-    });
-    
-    console.log(`Stream: ${response.status} ${response.headers['content-type']} (SSL fixed)`);
-    
-    // Set headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    if (response.headers['content-type']) {
-        res.setHeader('Content-Type', response.headers['content-type']);
-    }
-    if (response.headers['content-length']) {
-        res.setHeader('Content-Length', response.headers['content-length']);
-    }
-    if (response.headers['accept-ranges']) {
-        res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-    }
-    if (response.headers['content-range']) {
-        res.setHeader('Content-Range', response.headers['content-range']);
-        res.status(206);
-    }
-    
-    // Pipe stream
-    response.data.pipe(res);
-    console.log(`✅ Stream piped (SSL error fixed)`);
-    
-    response.data.on('error', (error) => {
-        console.error('Stream error:', error.message);
-    });
-    
-    res.on('close', () => {
-        if (response.data && response.data.destroy) {
-            response.data.destroy();
-        }
-    });
-}
-
-// Special TS segment handler for HLS streaming
-async function streamTsSegment(targetUrl, req, res) {
-    console.log('🎬 TS Segment request:', targetUrl);
-    
-    const segmentHeaders = {
-        'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
-        'Accept': '*/*',
-        'Accept-Encoding': 'identity',
-        'Connection': 'keep-alive'
-    };
-    
-    if (req.headers.range) {
-        segmentHeaders['Range'] = req.headers.range;
-    }
-    
-    try {
-        const response = await axios({
-            method: 'GET',
-            url: targetUrl,
-            responseType: 'stream',
-            timeout: 60000, // Shorter timeout for segments
-            headers: segmentHeaders,
-            httpsAgent: false,
-            httpAgent: false,
-            rejectUnauthorized: false,
-            maxRedirects: 3,
-            validateStatus: (status) => status < 500 // Accept 4xx but not 5xx
-        });
-        
-        console.log(`TS Segment: ${response.status} ${response.headers['content-type']} ${response.headers['content-length']} bytes`);
-        
-        // Set headers for TS segment
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Content-Type', 'video/mp2t'); // Force TS content type
-        
-        if (response.headers['content-length']) {
-            res.setHeader('Content-Length', response.headers['content-length']);
-        }
-        if (response.headers['accept-ranges']) {
-            res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-        }
-        if (response.headers['content-range']) {
-            res.setHeader('Content-Range', response.headers['content-range']);
-            res.status(206);
-        } else {
-            res.status(200);
-        }
-        
-        // Add caching for segments
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        
-        // Pipe the TS segment
-        response.data.pipe(res);
-        console.log(`✅ TS segment piped successfully`);
-        
-        response.data.on('error', (error) => {
-            console.error('TS segment error:', error.message);
-            if (!res.headersSent) {
-                res.status(502).json({ error: 'TS segment error', details: error.message });
-            }
-        });
-        
-        res.on('close', () => {
-            if (response.data && response.data.destroy) {
-                response.data.destroy();
-            }
-        });
-        
-    } catch (error) {
-        console.error(`❌ TS Segment failed: ${error.message}`);
-        console.error(`   URL: ${targetUrl}`);
-        console.error(`   Status: ${error.response?.status}`);
-        console.error(`   Headers: ${JSON.stringify(error.response?.headers)}`);
-        
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        
-        if (!res.headersSent) {
-            // Try to provide more specific error info
-            const errorStatus = error.response?.status || 502;
-            res.status(errorStatus).json({
-                error: 'TS segment failed',
-                url: targetUrl,
-                details: error.message,
-                httpStatus: error.response?.status,
-                timestamp: new Date().toISOString()
-            });
-        }
-    }
-}
-
+// Health check endpoint
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        server: 'ts-segment-fixed',
+    res.json({ 
+        status: 'OK', 
+        service: 'IPTV ADTS→AAC Transcoding',
         timestamp: new Date().toISOString()
     });
 });
 
-app.use((error, req, res, next) => {
-    console.error('Global error:', error.message);
-    res.setHeader('Access-Control-Allow-Origin', '*');
+// Main proxy endpoint with FFmpeg transcoding
+app.get('/proxy', async (req, res) => {
+    const targetUrl = req.query.url;
     
-    if (!res.headersSent) {
-        res.status(500).json({
-            error: 'Server error',
-            timestamp: new Date().toISOString()
+    if (!targetUrl) {
+        return res.status(400).json({ error: 'URL parameter required' });
+    }
+
+    console.log(`🎬 TRANSCODING REQUEST: ${targetUrl}`);
+    
+    try {
+        // Step 1: Fetch original stream
+        console.log('📡 Fetching original stream...');
+        const response = await fetch(targetUrl, {
+            headers: {
+                'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
+                'Accept': '*/*',
+                'Connection': 'keep-alive'
+            },
+            timeout: 10000
         });
+
+        if (!response.ok) {
+            throw new Error(`Stream fetch failed: ${response.status}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        console.log(`📊 Original Content-Type: ${contentType}`);
+
+        // Step 2: Setup browser-compatible response headers
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+
+        // Step 3: Detect if transcoding needed
+        const needsTranscoding = (
+            contentType.includes('mp2t') ||           // MPEG-TS streams
+            contentType.includes('adts') ||           // ADTS audio streams  
+            contentType.includes('application/octet-stream') || // Unknown binary
+            targetUrl.includes('.ts') ||              // .ts files
+            !contentType.includes('mp4')              // Non-MP4 formats
+        );
+
+        if (!needsTranscoding && contentType.includes('mp4')) {
+            console.log('✅ Stream already MP4 - Direct proxy (no transcoding)');
+            response.body.pipe(res);
+            return;
+        }
+
+        console.log('🔄 TRANSCODING NEEDED - Starting FFmpeg with browser-compatible params...');
+        
+        // Step 4: FFmpeg transcoding with CORRECT parameters
+        const ffmpeg = spawn('ffmpeg', [
+            '-i', 'pipe:0',                    // Input from stdin
+            '-y',                              // Overwrite output
+            
+            // === BROWSER COMPATIBILITY PARAMETERS ===
+            '-f', 'mp4',                       // Force MP4 container
+            '-movflags', 'frag_keyframe+empty_moov+default_base_moof', // Streaming MP4
+            '-fflags', '+genpts+igndts',       // Generate proper timestamps
+            
+            // === VIDEO ENCODING ===
+            '-c:v', 'libx264',                 // H.264 video codec
+            '-preset', 'ultrafast',            // Fast encoding for live streams
+            '-tune', 'zerolatency',            // Low latency for IPTV
+            '-profile:v', 'baseline',          // Maximum browser compatibility
+            '-level', '3.1',                   // Broad device support
+            '-pix_fmt', 'yuv420p',            // Standard pixel format
+            '-r', '25',                        // Standard frame rate
+            
+            // === AUDIO ENCODING (ADTS → AAC FIX) ===
+            '-c:a', 'aac',                     // Force AAC audio codec
+            '-ar', '48000',                    // 48kHz sample rate
+            '-ac', '2',                        // Stereo audio
+            '-ab', '128k',                     // 128kbps audio bitrate
+            '-aac_coder', 'twoloop',           // High quality AAC encoder
+            
+            // === STREAMING OPTIMIZATIONS ===
+            '-avoid_negative_ts', 'make_zero', // Fix timestamp issues
+            '-max_delay', '1000000',           // 1 second max delay
+            '-max_muxing_queue_size', '1024',  // Large muxing queue
+            '-thread_queue_size', '512',       // Threading optimization
+            
+            // === OUTPUT ===
+            '-f', 'mp4',                       // Output format
+            'pipe:1'                           // Output to stdout
+        ], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        // Handle FFmpeg events
+        ffmpeg.on('spawn', () => {
+            console.log('✅ FFmpeg transcoding started successfully');
+        });
+
+        ffmpeg.stderr.on('data', (data) => {
+            const logLine = data.toString();
+            if (logLine.includes('frame=') || logLine.includes('time=')) {
+                console.log(`📊 FFmpeg: ${logLine.trim()}`);
+            } else if (logLine.includes('error') || logLine.includes('Error')) {
+                console.error(`❌ FFmpeg error: ${logLine.trim()}`);
+            }
+        });
+
+        ffmpeg.on('error', (error) => {
+            console.error('❌ FFmpeg spawn error:', error);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Transcoding failed to start' });
+            }
+        });
+
+        ffmpeg.on('exit', (code, signal) => {
+            console.log(`🏁 FFmpeg finished: code=${code}, signal=${signal}`);
+            if (code !== 0 && code !== null) {
+                console.error(`❌ FFmpeg exited with code ${code}`);
+            }
+        });
+
+        // Step 5: Pipe stream through FFmpeg
+        console.log('🔄 Piping stream: Original → FFmpeg → Browser');
+        response.body.pipe(ffmpeg.stdin);
+        ffmpeg.stdout.pipe(res);
+
+        // Handle client disconnect
+        res.on('close', () => {
+            console.log('🔌 Client disconnected - stopping FFmpeg');
+            ffmpeg.kill('SIGTERM');
+        });
+
+        req.on('close', () => {
+            console.log('🔌 Request closed - stopping FFmpeg');  
+            ffmpeg.kill('SIGTERM');
+        });
+
+    } catch (error) {
+        console.error('❌ Proxy error:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: 'Stream processing failed',
+                details: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
     }
 });
 
+// Start server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('=====================================');
-    console.log('🎬 TS SEGMENT FIXED IPTV PROXY');
-    console.log(`📡 Port: ${PORT}`);
-    console.log('✅ Original protocol preserved');
-    console.log('✅ HTTP servers supported');
-    console.log('✅ TS segments special handling');
-    console.log('✅ Mixed content solved via proxy');
-    console.log('=====================================');
+    console.log(`🚀 IPTV Transcoding Server running on port ${PORT}`);
+    console.log(`✅ ADTS→AAC transcoding with browser-compatible FFmpeg parameters`);
+    console.log(`🔗 Health: http://localhost:${PORT}/health`);
+    console.log(`🎬 Proxy: http://localhost:${PORT}/proxy?url=STREAM_URL`);
 });
