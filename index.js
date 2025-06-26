@@ -18,13 +18,13 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('FIXED SSL ERROR - IPTV Relay Server Ready');
+    res.send('TS SEGMENT FIXED - IPTV Relay Server Ready');
 });
 
 app.all('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     
-    console.log(`\n=== SSL ERROR FIX REQUEST ===`);
+    console.log(`\n=== TS SEGMENT FIX REQUEST ===`);
     console.log(`Target: ${targetUrl}`);
     
     // Always set CORS headers
@@ -50,7 +50,7 @@ app.all('/proxy', async (req, res) => {
         const isChannelList = targetUrl.includes('get.php') && targetUrl.includes('type=m3u');
         const isStreamUrl = targetUrl.includes('/live/') || targetUrl.match(/\/\d+$/);
         const isM3u8File = targetUrl.includes('.m3u8');
-        const isTsFile = targetUrl.includes('.ts');
+        const isTsFile = targetUrl.includes('.ts') || targetUrl.match(/_\d+\.ts$/);
         
         console.log(`Content: List=${isChannelList}, Stream=${isStreamUrl}, M3U8=${isM3u8File}, TS=${isTsFile}`);
         
@@ -172,6 +172,10 @@ app.all('/proxy', async (req, res) => {
                 await streamContent(originalUrl, req, res);
             }
             
+        } else if (isTsFile || targetUrl.includes('.ts')) {
+            // Handle TS segments with special care
+            console.log('>>> TS SEGMENT - Special handling');
+            await streamTsSegment(originalUrl, req, res);
         } else {
             // Handle direct stream
             console.log('>>> Direct stream');
@@ -251,10 +255,100 @@ async function streamContent(targetUrl, req, res) {
     });
 }
 
+// Special TS segment handler for HLS streaming
+async function streamTsSegment(targetUrl, req, res) {
+    console.log('🎬 TS Segment request:', targetUrl);
+    
+    const segmentHeaders = {
+        'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
+        'Accept': '*/*',
+        'Accept-Encoding': 'identity',
+        'Connection': 'keep-alive'
+    };
+    
+    if (req.headers.range) {
+        segmentHeaders['Range'] = req.headers.range;
+    }
+    
+    try {
+        const response = await axios({
+            method: 'GET',
+            url: targetUrl,
+            responseType: 'stream',
+            timeout: 60000, // Shorter timeout for segments
+            headers: segmentHeaders,
+            httpsAgent: false,
+            httpAgent: false,
+            rejectUnauthorized: false,
+            maxRedirects: 3,
+            validateStatus: (status) => status < 500 // Accept 4xx but not 5xx
+        });
+        
+        console.log(`TS Segment: ${response.status} ${response.headers['content-type']} ${response.headers['content-length']} bytes`);
+        
+        // Set headers for TS segment
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', 'video/mp2t'); // Force TS content type
+        
+        if (response.headers['content-length']) {
+            res.setHeader('Content-Length', response.headers['content-length']);
+        }
+        if (response.headers['accept-ranges']) {
+            res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+        }
+        if (response.headers['content-range']) {
+            res.setHeader('Content-Range', response.headers['content-range']);
+            res.status(206);
+        } else {
+            res.status(200);
+        }
+        
+        // Add caching for segments
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        
+        // Pipe the TS segment
+        response.data.pipe(res);
+        console.log(`✅ TS segment piped successfully`);
+        
+        response.data.on('error', (error) => {
+            console.error('TS segment error:', error.message);
+            if (!res.headersSent) {
+                res.status(502).json({ error: 'TS segment error', details: error.message });
+            }
+        });
+        
+        res.on('close', () => {
+            if (response.data && response.data.destroy) {
+                response.data.destroy();
+            }
+        });
+        
+    } catch (error) {
+        console.error(`❌ TS Segment failed: ${error.message}`);
+        console.error(`   URL: ${targetUrl}`);
+        console.error(`   Status: ${error.response?.status}`);
+        console.error(`   Headers: ${JSON.stringify(error.response?.headers)}`);
+        
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
+        if (!res.headersSent) {
+            // Try to provide more specific error info
+            const errorStatus = error.response?.status || 502;
+            res.status(errorStatus).json({
+                error: 'TS segment failed',
+                url: targetUrl,
+                details: error.message,
+                httpStatus: error.response?.status,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+}
+
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
-        server: 'ssl-error-fixed',
+        server: 'ts-segment-fixed',
         timestamp: new Date().toISOString()
     });
 });
@@ -273,10 +367,11 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log('=====================================');
-    console.log('🔒 SSL ERROR FIXED IPTV PROXY');
+    console.log('🎬 TS SEGMENT FIXED IPTV PROXY');
     console.log(`📡 Port: ${PORT}`);
     console.log('✅ Original protocol preserved');
     console.log('✅ HTTP servers supported');
+    console.log('✅ TS segments special handling');
     console.log('✅ Mixed content solved via proxy');
     console.log('=====================================');
 });
