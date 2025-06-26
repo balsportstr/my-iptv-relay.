@@ -1,12 +1,10 @@
 {
   "name": "iptv-transcoding-server",
   "version": "2.0.0",
-  "description": "IPTV ADTS to AAC transcoding proxy server with FFmpeg",
+  "description": "IPTV ADTS to AAC transcoding proxy server with FFmpeg - No external dependencies",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "curl http://localhost:3000/health"
+    "start": "node index.js"
   },
   "keywords": [
     "iptv", 
@@ -15,28 +13,11 @@
     "adts", 
     "aac", 
     "streaming",
-    "proxy",
-    "cors"
+    "proxy"
   ],
   "author": "IPTV Team",
   "license": "MIT",
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "node-fetch": "^2.7.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
   "engines": {
     "node": ">=16.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "your-github-repo-url"
-  },
-  "bugs": {
-    "url": "your-github-repo-url/issues"
-  },
-  "homepage": "your-github-repo-url#readme"
+  }
 }
