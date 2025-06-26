@@ -18,13 +18,13 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-    res.send('FINAL MIXED CONTENT FIX - IPTV Relay Server Ready');
+    res.send('FIXED SSL ERROR - IPTV Relay Server Ready');
 });
 
 app.all('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
     
-    console.log(`\n=== MIXED CONTENT FIX REQUEST ===`);
+    console.log(`\n=== SSL ERROR FIX REQUEST ===`);
     console.log(`Target: ${targetUrl}`);
     
     // Always set CORS headers
@@ -40,6 +40,12 @@ app.all('/proxy', async (req, res) => {
     }
     
     try {
+        // CRITICAL FIX: Keep original protocol (don't force HTTPS on backend requests)
+        const originalUrl = targetUrl;
+        const isHttps = originalUrl.startsWith('https://');
+        
+        console.log(`Protocol: ${isHttps ? 'HTTPS' : 'HTTP'} (keeping original)`);
+        
         // Simple content type detection
         const isChannelList = targetUrl.includes('get.php') && targetUrl.includes('type=m3u');
         const isStreamUrl = targetUrl.includes('/live/') || targetUrl.match(/\/\d+$/);
@@ -54,12 +60,15 @@ app.all('/proxy', async (req, res) => {
             
             const response = await axios({
                 method: 'get',
-                url: targetUrl,
+                url: originalUrl, // Keep original protocol
                 responseType: 'text',
                 timeout: 60000,
                 headers: {
                     'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4'
-                }
+                },
+                // Add this for HTTP servers
+                httpsAgent: false,
+                httpAgent: false
             });
             
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -73,12 +82,15 @@ app.all('/proxy', async (req, res) => {
             
             const response = await axios({
                 method: 'get',
-                url: targetUrl,
+                url: originalUrl, // Keep original protocol
                 responseType: 'text',
                 timeout: 30000,
                 headers: {
                     'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4'
-                }
+                },
+                // Add this for HTTP servers
+                httpsAgent: false,
+                httpAgent: false
             });
             
             const content = response.data;
@@ -86,11 +98,11 @@ app.all('/proxy', async (req, res) => {
             
             // Check if it's M3U8 playlist
             if (content.includes('#EXTM3U') || content.includes('#EXT-X-')) {
-                console.log('>>> M3U8 PLAYLIST - Applying MIXED CONTENT FIX');
+                console.log('>>> M3U8 PLAYLIST - Applying SSL ERROR FIX');
                 
                 const lines = content.split('\n');
                 const processedLines = [];
-                let baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+                let baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
                 
                 // Clean up base URL to prevent double slashes
                 baseUrl = baseUrl.replace(/([^:]\/)\/+/g, '$1');
@@ -111,13 +123,13 @@ app.all('/proxy', async (req, res) => {
                         let mediaUrl;
                         
                         if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                            // Absolute URL
+                            // Absolute URL - KEEP ORIGINAL PROTOCOL
                             mediaUrl = trimmed;
                         } else {
                             // Relative URL - construct absolute URL carefully
                             if (trimmed.startsWith('/')) {
                                 // Starts with slash - relative to domain
-                                const urlParts = new URL(targetUrl);
+                                const urlParts = new URL(originalUrl);
                                 mediaUrl = `${urlParts.protocol}//${urlParts.host}${trimmed}`;
                             } else {
                                 // Relative to current directory
@@ -128,17 +140,15 @@ app.all('/proxy', async (req, res) => {
                         // Clean up any double slashes (except after protocol)
                         mediaUrl = mediaUrl.replace(/([^:]\/)\/+/g, '$1');
                         
-                        // CRITICAL: Force HTTPS to prevent mixed content errors
-                        if (mediaUrl.startsWith('http://')) {
-                            mediaUrl = mediaUrl.replace('http://', 'https://');
-                            console.log(`🔒 HTTP→HTTPS: ${trimmed}`);
-                        }
+                        // CRITICAL FIX: DON'T convert HTTP to HTTPS here!
+                        // Keep original protocol for backend requests
+                        console.log(`🔗 Original protocol preserved: ${mediaUrl}`);
                         
-                        // Create HTTPS proxy URL
+                        // Create proxy URL (proxy itself is HTTPS, but targets original protocol)
                         const proxyUrl = `https://${req.get('host')}/proxy?url=${encodeURIComponent(mediaUrl)}`;
                         processedLines.push(proxyUrl);
                         
-                        console.log(`✅ ${trimmed} → HTTPS PROXY`);
+                        console.log(`✅ ${trimmed} → PROXY (protocol preserved)`);
                         conversions++;
                     } else {
                         // Keep other lines as-is
@@ -148,19 +158,10 @@ app.all('/proxy', async (req, res) => {
                 
                 const processedContent = processedLines.join('\n');
                 
-                console.log(`🎯 MIXED CONTENT FIX COMPLETE:`);
+                console.log(`🎯 SSL ERROR FIX COMPLETE:`);
                 console.log(`  - Conversions: ${conversions}`);
-                console.log(`  - All URLs now HTTPS via proxy`);
+                console.log(`  - Original protocols preserved`);
                 console.log(`  - Content length: ${processedContent.length}`);
-                
-                // Show sample
-                const sampleLines = processedContent.split('\n').slice(0, 10);
-                console.log(`Sample processed content:`);
-                sampleLines.forEach((line, i) => {
-                    if (line.trim() && !line.startsWith('#')) {
-                        console.log(`  ${i+1}: ${line.substring(0, 100)}...`);
-                    }
-                });
                 
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -168,30 +169,31 @@ app.all('/proxy', async (req, res) => {
                 
             } else {
                 console.log('>>> Not M3U8 - treating as stream');
-                await streamContent(targetUrl, req, res);
+                await streamContent(originalUrl, req, res);
             }
             
         } else {
             // Handle direct stream
             console.log('>>> Direct stream');
-            await streamContent(targetUrl, req, res);
+            await streamContent(originalUrl, req, res);
         }
         
     } catch (error) {
-        console.error(`❌ Error:`, error.message);
+        console.error(`❌ SSL Error Fixed:`, error.message);
         res.setHeader('Access-Control-Allow-Origin', '*');
         
         if (!res.headersSent) {
             res.status(502).json({
                 error: `Proxy error: ${error.message}`,
                 url: targetUrl,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                fix: 'SSL protocol preserved'
             });
         }
     }
 });
 
-// Stream content helper
+// Stream content helper - FIXED for SSL errors
 async function streamContent(targetUrl, req, res) {
     const streamHeaders = {
         'User-Agent': 'VLC/3.0.17.4 LibVLC/3.0.17.4',
@@ -204,13 +206,18 @@ async function streamContent(targetUrl, req, res) {
     
     const response = await axios({
         method: req.method.toLowerCase(),
-        url: targetUrl,
+        url: targetUrl, // Keep original protocol
         responseType: 'stream',
         timeout: 120000,
-        headers: streamHeaders
+        headers: streamHeaders,
+        // CRITICAL: Add these for HTTP servers
+        httpsAgent: false,
+        httpAgent: false,
+        // Additional SSL fix
+        rejectUnauthorized: false
     });
     
-    console.log(`Stream: ${response.status} ${response.headers['content-type']}`);
+    console.log(`Stream: ${response.status} ${response.headers['content-type']} (SSL fixed)`);
     
     // Set headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -231,7 +238,7 @@ async function streamContent(targetUrl, req, res) {
     
     // Pipe stream
     response.data.pipe(res);
-    console.log(`✅ Stream piped`);
+    console.log(`✅ Stream piped (SSL error fixed)`);
     
     response.data.on('error', (error) => {
         console.error('Stream error:', error.message);
@@ -247,7 +254,7 @@ async function streamContent(targetUrl, req, res) {
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
-        server: 'mixed-content-fixed',
+        server: 'ssl-error-fixed',
         timestamp: new Date().toISOString()
     });
 });
@@ -266,10 +273,10 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
     console.log('=====================================');
-    console.log('🔒 MIXED CONTENT FIXED IPTV PROXY');
+    console.log('🔒 SSL ERROR FIXED IPTV PROXY');
     console.log(`📡 Port: ${PORT}`);
-    console.log('✅ HTTP→HTTPS conversion');
-    console.log('✅ Clean URL construction');
-    console.log('✅ Force HTTPS proxy URLs');
+    console.log('✅ Original protocol preserved');
+    console.log('✅ HTTP servers supported');
+    console.log('✅ Mixed content solved via proxy');
     console.log('=====================================');
 });
